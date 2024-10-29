@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 import ffmpeg
 import music_tag
 
-__version__ = '1.3.2'
+__version__ = '1.3.4'
 
 # defaults to darwin
 download_dir = '~/Downloads'
@@ -129,19 +129,29 @@ def download(url, quiet, save_dir, save=True):
                 if not quiet:
                     print(f'adding metadata to {file} ...')
 
-                # .m4a and .mp3 use different methods
+                # Get file extension and convert unsupported formats
                 _, file_ext = os.path.splitext(file)
                 file_ext = file_ext.lower()
 
-                if file_ext == '.webm' or file_ext == '.opus':
-                    old_file_path = os.path.join(save_dir, file)
-                    file = file_name + '.ogg'
-                    new_file_path = os.path.join(save_dir, file)
-                    ffmpeg.input(old_file_path).output(new_file_path, acodec='copy').run(overwrite_output=True)
-                    os.remove(old_file_path)
-                    file_ext = '.ogg'
+                file_path = os.path.join(save_dir, file)
+                new_file_path = file_path
 
-                set_metadata(os.path.join(save_dir, file), parsed, image, image_type)
+                # Convert unsupported formats to MP3
+                if file_ext in ['.webm', '.opus', '.m4a']:
+                    new_file_path = os.path.join(save_dir, file_name + '.mp3')
+                    ffmpeg.input(file_path).output(
+                        new_file_path, 
+                        acodec='libmp3lame', 
+                        q=2
+                    ).run(overwrite_output=True)
+                    os.remove(file_path)
+                    file = file_name + '.mp3'
+
+                # Only process supported audio formats
+                if file_ext in ['.mp3', '.flac', '.m4a', '.wma', '.wav']:
+                    set_metadata(new_file_path, parsed, image, image_type)
+                else:
+                    print(f"Warning: Unsupported file format {file_ext}")
 
     return parsed
 

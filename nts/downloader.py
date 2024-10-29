@@ -59,10 +59,9 @@ def download(url, quiet, save_dir, save=True):
     page = requests.get(url).content
     bs = BeautifulSoup(page, 'html.parser')
 
-    # guessing there is one
+    # Parsing NTS data
     parsed = parse_nts_data(bs)
     parsed['url'] = nts_url
-    # safe_title, date, title, artists, parsed_artists, genres, image_url = parse_nts_data(bs)
 
     button = bs.select('.episode__btn.mixcloud-btn')[0]
     link = button.get('data-src')
@@ -78,8 +77,7 @@ def download(url, quiet, save_dir, save=True):
     elif 'https://soundcloud' in link:
         host = 'soundcloud'
 
-    # get album art. If the one on mixcloud is available, use it. Otherwise,
-    # fall back to the nts website.
+    # Get album art
     page = requests.get(link).content
     bs = BeautifulSoup(page, 'html.parser')
     image_type = ''
@@ -110,37 +108,50 @@ def download(url, quiet, save_dir, save=True):
 
     file_name = f'{parsed["safe_title"]} - {parsed["date"].year}-{parsed["date"].month}-{parsed["date"].day}'
 
-    # download
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            # Skip progress for the initial download
+            pass
+        elif d['status'] == 'finished':
+            if not quiet:
+                print("\nDownload complete. Converting to AAC...", end='', flush=True)
+        elif d['status'] == 'processing':
+            if not quiet:
+                if '_total_bytes_estimate' in d:
+                    percentage = (d['_processed_bytes'] / d['_total_bytes_estimate']) * 100
+                    print(f"\rConverting to AAC... {percentage:.1f}%", end='', flush=True)
+        
     if save:
         if not quiet:
-            print(f'\ndownloading into: {save_dir}\n')
+            print(f'\nDownloading into: {save_dir}\n')
+
         ydl_opts = {
+            'format': 'bestaudio/best',
             'outtmpl': os.path.join(save_dir, f'{file_name}.%(ext)s'),
-            'quiet': quiet
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'm4a',
+                'preferredquality': '128',
+            }],
+            'quiet': quiet,
+            'progress_hooks': [progress_hook],
+            'postprocessor_hooks': [progress_hook]
         }
+
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([link])
+            if not quiet:
+                print("\nConversion complete!")
 
-        # get the downloaded file
+        # Get the downloaded file
         files = os.listdir(save_dir)
         for file in files:
             if file.startswith(file_name):
-                # found
+                # Found the file
                 if not quiet:
-                    print(f'adding metadata to {file} ...')
+                    print(f'Adding metadata to {file} ...')
 
-                # .m4a and .mp3 use different methods
-                _, file_ext = os.path.splitext(file)
-                file_ext = file_ext.lower()
-
-                if file_ext == '.webm' or file_ext == '.opus':
-                    old_file_path = os.path.join(save_dir, file)
-                    file = file_name + '.ogg'
-                    new_file_path = os.path.join(save_dir, file)
-                    ffmpeg.input(old_file_path).output(new_file_path, acodec='copy').run(overwrite_output=True)
-                    os.remove(old_file_path)
-                    file_ext = '.ogg'
-
+                # Apply metadata to the .mp3 file
                 set_metadata(os.path.join(save_dir, file), parsed, image, image_type)
 
     return parsed
